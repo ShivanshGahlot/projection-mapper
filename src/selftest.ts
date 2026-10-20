@@ -2,6 +2,8 @@
 // animates and that every control visibly changes the image. Results go to #results as JSON.
 
 import { shaderLibrary } from './shaderLibrary';
+import { library } from './library';
+import { builtinManifest } from './library/manifest';
 import { parseIsf, defaultValues, isAdjustable } from './isf/parse';
 import type { InputValue, IsfInput, ParsedIsf } from './isf/parse';
 import { IsfProgram } from './isf/compile';
@@ -40,6 +42,8 @@ interface ShaderResult {
   error: string;
   width: number;
   height: number;
+  /** Static shaders (marked in the library manifest) skip the animation check. */
+  static?: boolean;
   animates?: { nativePct: number; squarePct: number; pass: boolean };
   controls: ControlResult[];
   pass: boolean;
@@ -101,13 +105,23 @@ function nativeSize(source: string): [number, number] {
   return aspect >= 1 ? [LONG_SIDE, Math.round(LONG_SIDE / aspect)] : [Math.round(LONG_SIDE * aspect), LONG_SIDE];
 }
 
+/** Colour inputs are tested too, with a contrasting colour (each channel pushed to its far extreme). */
+function isTestable(input: IsfInput): boolean {
+  return isAdjustable(input) || input.type === 'color';
+}
+
 function alternatives(input: IsfInput, current: InputValue): InputValue[] {
+  if (input.type === 'color') {
+    const c = current as number[];
+    return [[c[0] < 0.5 ? 1 : 0, c[1] < 0.5 ? 1 : 0, c[2] < 0.5 ? 1 : 0, c[3] ?? 1]];
+  }
   if (input.type === 'bool') return [!current];
   if (input.type === 'long') return (input.values ?? []).filter((v) => v !== current);
   return [input.min!, input.max!].filter((v) => v !== current);
 }
 
 function fmt(v: InputValue): string {
+  if (Array.isArray(v)) return `[${v.map((n) => Math.round(n * 100) / 100).join(',')}]`;
   return typeof v === 'number' ? String(Math.round(v * 1000) / 1000) : String(v);
 }
 
@@ -133,7 +147,7 @@ function isCalibration(i: IsfInput): boolean {
 }
 
 async function testControls(prog: IsfProgram, parsed: ParsedIsf, w: number, h: number): Promise<ControlResult[]> {
-  const inputs = parsed.meta.inputs.filter(isAdjustable);
+  const inputs = parsed.meta.inputs.filter(isTestable);
   const defaults = defaultValues(parsed.meta.inputs);
   const total = w * h;
   const need = Math.max(CONTROL_MIN_PIXELS, Math.ceil(total * CONTROL_MIN_FRACTION));
@@ -230,9 +244,10 @@ async function run() {
   const dbg = gl.getExtension('WEBGL_debug_renderer_info');
   const renderer = dbg ? String(gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL)) : 'unknown';
 
-  for (const lib of shaderLibrary) {
+  const staticIds = new Set(builtinManifest.filter((b) => b.static).map((b) => `builtin/${b.slug}`));
+  for (const lib of library.shaders) {
     const [w, h] = nativeSize(lib.source);
-    const result: ShaderResult = { fileName: lib.fileName, compiled: false, error: '', width: w, height: h, controls: [], pass: false };
+    const result: ShaderResult = { fileName: lib.id, static: staticIds.has(lib.id), compiled: false, error: '', width: w, height: h, controls: [], pass: false };
     shaders.push(result);
     try {
       const parsed = parseIsf(lib.source);
@@ -251,9 +266,9 @@ async function run() {
         result.animates = {
           nativePct: Math.round(nativePct * 100) / 100,
           squarePct: Math.round(squarePct * 100) / 100,
-          pass: nativePct / 100 > ANIMATE_MIN_FRACTION && squarePct / 100 > ANIMATE_MIN_FRACTION,
+          pass: !!result.static || nativePct / 100 > ANIMATE_MIN_FRACTION && squarePct / 100 > ANIMATE_MIN_FRACTION,
         };
-        sheet.append(thumbnail(base, w, h, `${lib.fileName} (${w}x${h})`));
+        sheet.append(thumbnail(base, w, h, `${lib.id} (${w}x${h})`));
         result.controls = await testControls(prog, parsed, w, h);
         prog.dispose();
       }
@@ -261,7 +276,7 @@ async function run() {
       result.error = String(e);
     }
     result.pass = result.compiled && !!result.animates?.pass && result.controls.every((c) => c.pass);
-    document.getElementById('status')!.textContent = `Running ISF selftest... ${shaders.length}/${shaderLibrary.length}`;
+    document.getElementById('status')!.textContent = `Running ISF selftest... ${shaders.length}/${library.shaders.length}`;
     await sleep(0);
   }
 
