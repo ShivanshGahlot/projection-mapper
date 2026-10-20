@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Renderer test</title>
+  <style>
+    body { margin: 12px; background: #111; color: #ddd; font: 13px/1.4 system-ui, sans-serif; }
+    canvas { display: block; background: #000; }
+    #row { display: flex; gap: 12px; align-items: flex-start; }
+    #info { margin: 6px 0; white-space: pre; font-family: ui-monospace, monospace; }
+  </style>
+</head>
+<body>
+  <div id="info">starting...</div>
+  <div id="row">
+    <canvas id="out" width="1280" height="720"></canvas>
+    <div>
+      <div>renderContent (shader layer)</div>
+      <canvas id="content" width="240" height="135"></canvas>
+    </div>
+  </div>
+  <script type="module" src="/src/render/rendertest.ts"></script>
+</body>
+</html>
