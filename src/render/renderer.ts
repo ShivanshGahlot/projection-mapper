@@ -42,7 +42,16 @@ interface LayerRt {
   drawn: boolean;
   /** Last-resort error from a render that threw; cleared on the next project change. */
   error: LayerStatus | null;
+  /** Input-panel size hint (px of the panel's display) and when it was last refreshed. */
+  hintW: number;
+  hintH: number;
+  hintAt: number;
+  /** Scratch request used while a hint enlarges the render. */
+  eff: SizeRequest;
 }
+
+/** A renderContent size hint stays in force this long after the last call. */
+const HINT_TTL_MS = 500;
 
 function newGeom(): Geom {
   return {
@@ -178,7 +187,7 @@ class WebGlRenderer implements Renderer {
             rt.source = createSource({ gl: this.gl, assets: this.assets }, layer.content);
           }
         } else {
-          rt = { layer, source: createSource({ gl: this.gl, assets: this.assets }, layer.content), geom: newGeom(), out: null, outTick: 0, drawn: false, error: null };
+          rt = { layer, source: createSource({ gl: this.gl, assets: this.assets }, layer.content), geom: newGeom(), out: null, outTick: 0, drawn: false, error: null, hintW: 0, hintH: 0, hintAt: -Infinity, eff: { w: 16, h: 16, bw: 32, bh: 32, refW: 1, refH: 1 } };
           this.layers.set(id, rt);
         }
       }
@@ -331,12 +340,31 @@ class WebGlRenderer implements Renderer {
     if (rt.outTick === this.tickCount) return rt.out;
     rt.outTick = this.tickCount;
     try {
-      rt.out = rt.source.render(req);
+      rt.out = rt.source.render(rt.source.generated ? this.withHint(rt, req) : req);
     } catch (e) {
       rt.out = null;
       rt.error = { state: 'error', message: e instanceof Error ? e.message : String(e) };
     }
     return rt.out;
+  }
+
+  /**
+   * Enlarges a generated source's request to the Input panel's display size while a
+   * fresh hint exists. The aspect of `req` is kept so RENDERSIZE stays consistent
+   * between the Input and Output panels; text layout reference size is unchanged.
+   */
+  private withHint(rt: LayerRt, req: SizeRequest): SizeRequest {
+    if (rt.hintW <= 0 || performance.now() - rt.hintAt > HINT_TTL_MS) return req;
+    const s = Math.min(MAX_SIZE / req.w, MAX_SIZE / req.h, Math.max(rt.hintW / req.w, rt.hintH / req.h));
+    if (s <= 1.01) return req;
+    const e = rt.eff;
+    e.w = Math.min(MAX_SIZE, Math.round(req.w * s));
+    e.h = Math.min(MAX_SIZE, Math.round(req.h * s));
+    e.bw = bucket(e.w);
+    e.bh = bucket(e.h);
+    e.refW = req.refW;
+    e.refH = req.refH;
+    return e;
   }
 
   // Drawing
@@ -529,6 +557,9 @@ class WebGlRenderer implements Renderer {
       const rt = this.layers.get(layerId);
       let out: SourceOutput | null = null;
       if (rt) {
+        rt.hintW = w;
+        rt.hintH = h;
+        rt.hintAt = performance.now();
         let req = rt.geom.req;
         if (!rt.geom.sized) {
           req = rt.geom.req;
