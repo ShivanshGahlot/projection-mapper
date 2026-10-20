@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ISF loader selftest</title>
+  <style>
+    body { margin: 16px; background: #111; color: #ddd; font: 13px/1.4 system-ui, sans-serif; }
+    h1 { font-size: 16px; margin: 0 0 8px; }
+    #sheet { display: flex; flex-wrap: wrap; gap: 10px; margin: 12px 0; }
+    figure { margin: 0; width: 240px; }
+    figure canvas { display: block; background: #000; }
+    figcaption { font-size: 11px; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    table { border-collapse: collapse; margin: 12px 0; }
+    td, th { border: 1px solid #333; padding: 2px 8px; text-align: left; }
+    .ok { color: #6c6; }
+    .bad { color: #f66; font-weight: bold; }
+    pre { font-size: 11px; max-height: 200px; overflow: auto; background: #000; padding: 6px; }
+  </style>
+</head>
+<body>
+  <h1 id="status">Running ISF selftest...</h1>
+  <div id="sheet"></div>
+  <div id="summary"></div>
+  <pre id="results"></pre>
+  <script type="module" src="/src/selftest.ts"></script>
+</body>
+</html>
