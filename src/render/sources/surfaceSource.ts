@@ -5,7 +5,7 @@ import { createProgram } from '../../gl/program';
 import { drawQuad } from '../../gl/quad';
 import { RenderTarget } from '../../gl/renderTarget';
 import type { Content, Fill, SurfaceContent } from '../../state/types';
-import type { LayerStatus } from '../api';
+import type { LayerClock, LayerStatus } from '../api';
 import { FULLSCREEN_VS } from '../programs';
 import {
   STATUS_LOADING,
@@ -74,11 +74,12 @@ void main() {
   float border = line(min(e.x, e.y), px * 6.0);
   float cross = max(line(abs(c.x), px * 2.0), line(abs(c.y), px * 2.0));
   float circle = line(abs(length(c) - min(u_size.x, u_size.y) * 0.45), px * 2.0);
-  vec3 col = vec3(0.07, 0.07, 0.09);
-  col = mix(col, vec3(0.42, 0.42, 0.48), grid);
-  col = mix(col, vec3(0.23, 0.51, 0.96), max(cross, circle));
-  col = mix(col, vec3(1.0), border);
-  o = vec4(col, 1.0);
+  // Lines only, over transparency (premultiplied): what's underneath shows through.
+  vec4 c4 = vec4(vec3(0.75, 0.75, 0.8), 1.0) * grid * 0.8;
+  float a = max(cross, circle);
+  c4 = vec4(0.23, 0.51, 0.96, 1.0) * a + c4 * (1.0 - a);
+  c4 = vec4(1.0) * border + c4 * (1.0 - border);
+  o = c4;
 }`;
 
 const gridPrograms = new WeakMap<WebGL2RenderingContext, { program: WebGLProgram; size: WebGLUniformLocation }>();
@@ -124,6 +125,9 @@ export class SurfaceSource implements ContentSource {
   private loop = true;
   private rate = 1;
   private wantPlaying = true;
+  private paused = false;
+  private ref: { v: number; at: number; r: number } | null = null;
+  private nudged = false;
   private st: LayerStatus = STATUS_OK;
   private token = 0;
   private gradKey = '';
@@ -164,6 +168,8 @@ export class SurfaceSource implements ContentSource {
   private release(): void {
     const gl = this.env.gl;
     this.token++;
+    this.nudged = false;
+    this.ref = null;
     if (this.tex) gl.deleteTexture(this.tex);
     this.tex = null;
     this.feed?.video.pause();
@@ -276,14 +282,59 @@ export class SurfaceSource implements ContentSource {
     const v = this.feed?.video;
     if (!v) return;
     this.wantPlaying = !frame.globalPaused;
+    this.paused = frame.globalPaused;
     if (this.fill.type === 'video') {
       if (v.loop !== this.loop) v.loop = this.loop;
-      if (v.playbackRate !== this.rate) v.playbackRate = this.rate;
+      if (!this.nudged && v.playbackRate !== this.rate) v.playbackRate = this.rate;
+      this.follow(v, frame.absMs);
     }
     if (frame.globalPaused) {
       if (!v.paused) v.pause();
     } else if (v.paused && v.src) {
       v.play().catch(() => {});
+    }
+  }
+
+  getClock(): LayerClock | null {
+    const v = this.feed?.video;
+    if (this.fill.type !== 'video' || !v || v.readyState < 1) return null;
+    return { v: v.currentTime, r: this.paused ? 0 : this.rate };
+  }
+
+  syncClock(clock: LayerClock, atAbsMs: number): void {
+    this.ref = clock.v === undefined ? null : { v: clock.v, at: atAbsMs, r: clock.r };
+  }
+
+  /**
+   * Keeps the video within a frame or so of the master: seek when more than 150 ms off,
+   * otherwise nudge playbackRate by +-3% while the error is above 30 ms.
+   */
+  private follow(v: HTMLVideoElement, absMs: number): void {
+    const ref = this.ref;
+    const dur = v.duration;
+    if (!ref || v.readyState < 1 || !Number.isFinite(dur) || dur <= 0 || v.seeking) return;
+    const age = absMs - ref.at;
+    if (age > 5000) return;
+    let target = ref.v + (age / 1000) * ref.r;
+    let err = target - v.currentTime;
+    if (this.loop) {
+      target = ((target % dur) + dur) % dur;
+      err = ((((target - v.currentTime) % dur) + dur + dur / 2) % dur) - dur / 2;
+    } else {
+      target = Math.min(target, dur);
+      err = target - v.currentTime;
+    }
+    const abs = Math.abs(err);
+    if (abs > (this.paused ? 0.04 : 0.15)) {
+      v.currentTime = Math.min(Math.max(0, v.currentTime + err), dur);
+      v.playbackRate = this.rate;
+      this.nudged = false;
+    } else if (!this.paused && abs > 0.03) {
+      v.playbackRate = Math.max(0.0625, this.rate * (err > 0 ? 1.03 : 0.97));
+      this.nudged = true;
+    } else if (this.nudged) {
+      v.playbackRate = this.rate;
+      this.nudged = false;
     }
   }
 

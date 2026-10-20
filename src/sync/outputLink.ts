@@ -1,6 +1,7 @@
 // Editor-side link to the output window: sends the project, opens/places the
 // window on the projector and tracks its status.
 
+import type { ClockSnapshot } from '../render/api';
 import type { Project } from '../state/types';
 import { CHANNEL_NAME, type EditorToOutput, type OutputToEditor } from './messages';
 
@@ -27,9 +28,12 @@ export class OutputLink {
   private pending: Project | null = null;
   private lastProject: Project | null = null;
   private raf = 0;
+  private timer = 0;
   private win: Window | null = null;
   private current: OutputLinkStatus = { state: 'disconnected', info: null };
   private lastSeen = 0;
+  /** Called when an output window says hello (so the editor can send clocks too). */
+  onHello: (() => void) | null = null;
   private listeners = new Set<(s: OutputLinkStatus) => void>();
   private watchdog: number;
   private outputUrl = new URL('output.html', location.href).href;
@@ -52,16 +56,28 @@ export class OutputLink {
     return () => this.listeners.delete(cb);
   }
 
-  /** Queues the project; at most one post per animation frame. */
+  /**
+   * Queues the project; at most one post per animation frame. A timer backs the frame up:
+   * a hidden or occluded editor window gets no animation frames, but the projector must
+   * still see edits.
+   */
   sendProject(project: Project): void {
     this.pending = project;
     this.lastProject = project;
     if (this.raf) return;
-    this.raf = requestAnimationFrame(() => {
+    const flush = () => {
+      cancelAnimationFrame(this.raf);
+      clearTimeout(this.timer);
       this.raf = 0;
       if (this.pending) this.post({ type: 'project', project: this.pending });
       this.pending = null;
-    });
+    };
+    this.raf = requestAnimationFrame(flush);
+    this.timer = window.setTimeout(flush, 50);
+  }
+
+  sendClocks(snap: ClockSnapshot): void {
+    this.post({ type: 'clocks', at: snap.at, layers: snap.layers });
   }
 
   identify(): void {
@@ -90,6 +106,7 @@ export class OutputLink {
   dispose(): void {
     clearInterval(this.watchdog);
     cancelAnimationFrame(this.raf);
+    clearTimeout(this.timer);
     this.channel.close();
     this.listeners.clear();
   }
@@ -103,6 +120,7 @@ export class OutputLink {
       case 'hello':
         if (this.lastProject) this.post({ type: 'project', project: this.lastProject });
         this.post({ type: 'ping' });
+        this.onHello?.();
         break;
       case 'status':
         this.lastSeen = performance.now();

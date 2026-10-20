@@ -20,6 +20,22 @@ export interface AssetResolver {
   getAssetUrl(assetId: string): Promise<string | null>;
 }
 
+/** One layer's playback clock, as read from the master (editor) renderer. */
+export interface LayerClock {
+  /** Shader clock in seconds (TIME is this plus the layer's timeOffset). */
+  t?: number;
+  /** Video currentTime in seconds, for video fills. */
+  v?: number;
+  /** Effective rate in clock-seconds per real second at the snapshot (0 when paused). */
+  r: number;
+}
+
+export interface ClockSnapshot {
+  /** Machine-wide time (performance.timeOrigin + performance.now(), ms) the values describe. */
+  at: number;
+  layers: Record<string, LayerClock>;
+}
+
 export interface Renderer {
   /** The WebGL canvas. The output window shows it directly; the editor copies from it. */
   readonly canvas: HTMLCanvasElement;
@@ -43,6 +59,14 @@ export interface Renderer {
    * context, filling it. Must be called in the same task as the render call.
    */
   copyTo(ctx: CanvasRenderingContext2D): void;
+  /** Current clocks of every layer that has one, stamped with the time of the last tick. */
+  getClocks(): ClockSnapshot;
+  /**
+   * Follows a master's clocks: each layer's clock is steered toward the snapshot
+   * extrapolated to the current time (snap when far off, smooth slew otherwise).
+   * `sentAtAbsMs` is ClockSnapshot.at from the master.
+   */
+  syncClocks(layers: Record<string, LayerClock>, sentAtAbsMs: number): void;
   /** Native content size (video/image/webcam pixels); null for generated content. */
   contentSize(layerId: string): { width: number; height: number } | null;
   status(layerId: string): LayerStatus;

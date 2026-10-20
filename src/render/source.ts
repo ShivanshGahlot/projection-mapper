@@ -6,7 +6,7 @@
 // globally by the renderer); render targets are y-up by nature.
 
 import type { Content } from '../state/types';
-import type { AssetResolver, LayerStatus } from './api';
+import type { AssetResolver, LayerClock, LayerStatus } from './api';
 
 export const STATUS_OK: LayerStatus = { state: 'ok' };
 export const STATUS_LOADING: LayerStatus = { state: 'loading' };
@@ -19,6 +19,8 @@ export interface SourceEnv {
 export interface FrameInfo {
   /** Real seconds since the previous tick, clamped. */
   dt: number;
+  /** Machine-wide time of this tick (performance.timeOrigin + frame time), ms. */
+  absMs: number;
   globalSpeed: number;
   globalPaused: boolean;
   /** year, month (1-12), day, seconds since midnight */
@@ -61,6 +63,10 @@ export interface ContentSource {
   /** Apply new content props. Returns false when this source cannot represent them (recreate it). */
   update(content: Content): boolean;
   tick(frame: FrameInfo): void;
+  /** This source's playback clock as of the last tick; omitted for sources without one. */
+  getClock?(): LayerClock | null;
+  /** Steer this source's clock toward a master's reading taken at absolute time `atAbsMs`. */
+  syncClock?(clock: LayerClock, atAbsMs: number): void;
   /** Texture for this frame, or null when nothing can be drawn (transparent / not ready / error). */
   render(size: SizeRequest): SourceOutput | null;
   /** Native pixel size for media, null for generated content. */

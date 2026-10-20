@@ -6,7 +6,7 @@ import { RenderTarget } from '../gl/renderTarget';
 import { drawQuad } from '../gl/quad';
 import { invert, isConvex, squareToQuad, toGl } from '../geometry/homography';
 import type { BlendMode, ContentLayer, MaskLayer, Project, Quad, Scene } from '../state/types';
-import type { AssetResolver, CreateRenderer, LayerStatus, Renderer, RenderStats } from './api';
+import type { AssetResolver, ClockSnapshot, CreateRenderer, LayerClock, LayerStatus, Renderer, RenderStats } from './api';
 import { MaskCache } from './masks';
 import { createPrograms, type Programs } from './programs';
 import { bucket, parseColor, type ContentSource, type FrameInfo, type SizeRequest, type SourceOutput } from './source';
@@ -42,16 +42,16 @@ interface LayerRt {
   drawn: boolean;
   /** Last-resort error from a render that threw; cleared on the next project change. */
   error: LayerStatus | null;
-  /** Input-panel size hint (px of the panel's display) and when it was last refreshed. */
-  hintW: number;
-  hintH: number;
-  hintAt: number;
-  /** Scratch request used while a hint enlarges the render. */
-  eff: SizeRequest;
+  /** Key of the inputs of the canonical generated-content size (geom.req). */
+  reqKey: Float64Array;
+  /** Last clock snapshot handed to the source. */
+  clockRef: ClockRef | null;
 }
 
-/** A renderContent size hint stays in force this long after the last call. */
-const HINT_TTL_MS = 500;
+interface ClockRef {
+  clock: LayerClock;
+  at: number;
+}
 
 function newGeom(): Geom {
   return {
@@ -99,11 +99,15 @@ class WebGlRenderer implements Renderer {
   private lastNow: number | null = null;
   private readonly frame: FrameInfo & { date: [number, number, number, number] } = {
     dt: 0,
+    absMs: 0,
     globalSpeed: 1,
     globalPaused: false,
     date: [0, 0, 0, 0],
   };
   private region = { w: 0, h: 0 };
+  private readonly clockRefs = new Map<string, ClockRef>();
+  /** Machine-wide time (ms) of the last tick; the moment the clocks returned by getClocks() describe. */
+  private tickAbs = 0;
   private lost = false;
   private readonly scratchKey = new Float64Array(15);
   private readonly maskTex: (WebGLTexture | null)[] = [null, null, null, null];
@@ -187,7 +191,7 @@ class WebGlRenderer implements Renderer {
             rt.source = createSource({ gl: this.gl, assets: this.assets }, layer.content);
           }
         } else {
-          rt = { layer, source: createSource({ gl: this.gl, assets: this.assets }, layer.content), geom: newGeom(), out: null, outTick: 0, drawn: false, error: null, hintW: 0, hintH: 0, hintAt: -Infinity, eff: { w: 16, h: 16, bw: 32, bh: 32, refW: 1, refH: 1 } };
+          rt = { layer, source: createSource({ gl: this.gl, assets: this.assets }, layer.content), geom: newGeom(), out: null, outTick: 0, drawn: false, error: null, reqKey: new Float64Array(9).fill(NaN), clockRef: null };
           this.layers.set(id, rt);
         }
       }
@@ -224,8 +228,14 @@ class WebGlRenderer implements Renderer {
       f.date[2] = d.getDate();
       f.date[3] = d.getHours() * 3600 + d.getMinutes() * 60 + d.getSeconds() + d.getMilliseconds() / 1000;
       this.tickCount++;
-      for (const rt of this.layers.values()) {
+      this.tickAbs = f.absMs = performance.timeOrigin + nowMs;
+      for (const [id, rt] of this.layers) {
         try {
+          const ref = this.clockRefs.get(id);
+          if (ref && ref !== rt.clockRef) {
+            rt.clockRef = ref;
+            rt.source.syncClock?.(ref.clock, ref.at);
+          }
           rt.source.tick(f);
         } catch (e) {
           rt.error = { state: 'error', message: e instanceof Error ? e.message : String(e) };
@@ -235,6 +245,23 @@ class WebGlRenderer implements Renderer {
     } catch (e) {
       console.error('[render] tick failed', e);
     }
+  }
+
+  // Clocks
+
+  getClocks(): ClockSnapshot {
+    const layers: Record<string, LayerClock> = {};
+    for (const [id, rt] of this.layers) {
+      const c = rt.source.getClock?.();
+      if (c) layers[id] = c;
+    }
+    return { at: this.tickAbs, layers };
+  }
+
+  syncClocks(layers: Record<string, LayerClock>, sentAtAbsMs: number): void {
+    // Kept by id (not by source) so a layer that is created or rebuilt later still picks it up.
+    this.clockRefs.clear();
+    for (const id in layers) this.clockRefs.set(id, { clock: layers[id], at: sentAtAbsMs });
   }
 
   // Status
@@ -319,52 +346,51 @@ class WebGlRenderer implements Renderer {
     g.radius = l.cornerRadius * s;
     g.feather = l.edgeFeather * s;
 
-    // Generated content: sized to the longest opposite sides (so perspective never
-    // under-samples) in project px, times render scale (capped at 1) and quality.
-    const wp = Math.max(dist(c[0], c[1]), dist(c[3], c[2]));
-    const hp = Math.max(dist(c[0], c[3]), dist(c[1], c[2]));
-    const scale = Math.min(1, sx) * Math.max(0.05, l.quality);
-    const r = g.req;
+    return g;
+  }
+
+  /**
+   * Canonical size of a generated source: the layer's longest opposite sides in PROJECT
+   * pixels times its quality. Deliberately independent of the window / panel being drawn,
+   * so the editor preview and the projector run the shader at exactly the same RENDERSIZE.
+   */
+  private sizeRequest(rt: LayerRt): SizeRequest {
+    const l = rt.layer;
+    const c = l.corners;
+    const k = rt.reqKey;
+    let same = true;
+    const next = [c[0][0], c[0][1], c[1][0], c[1][1], c[2][0], c[2][1], c[3][0], c[3][1], l.quality];
+    for (let i = 0; i < 9; i++) {
+      if (next[i] !== k[i]) same = false;
+      k[i] = next[i];
+    }
+    const r = rt.geom.req;
+    if (same && rt.geom.sized) return r;
+    const fin = (n: number, d: number) => (Number.isFinite(n) ? n : d);
+    const wp = fin(Math.max(dist(c[0], c[1]), dist(c[3], c[2])), MIN_SIZE);
+    const hp = fin(Math.max(dist(c[0], c[3]), dist(c[1], c[2])), MIN_SIZE);
+    const scale = Math.max(0.05, fin(l.quality, 1));
     r.w = clampSize(wp * scale);
     r.h = clampSize(hp * scale);
     r.bw = bucket(r.w);
     r.bh = bucket(r.h);
     r.refW = Math.max(1, wp);
     r.refH = Math.max(1, hp);
-    g.sized = true;
-    return g;
+    rt.geom.sized = true;
+    return r;
   }
 
   /** Renders a layer's source at most once per tick. */
-  private output(rt: LayerRt, req: SizeRequest): SourceOutput | null {
+  private output(rt: LayerRt): SourceOutput | null {
     if (rt.outTick === this.tickCount) return rt.out;
     rt.outTick = this.tickCount;
     try {
-      rt.out = rt.source.render(rt.source.generated ? this.withHint(rt, req) : req);
+      rt.out = rt.source.render(this.sizeRequest(rt));
     } catch (e) {
       rt.out = null;
       rt.error = { state: 'error', message: e instanceof Error ? e.message : String(e) };
     }
     return rt.out;
-  }
-
-  /**
-   * Enlarges a generated source's request to the Input panel's display size while a
-   * fresh hint exists. The aspect of `req` is kept so RENDERSIZE stays consistent
-   * between the Input and Output panels; text layout reference size is unchanged.
-   */
-  private withHint(rt: LayerRt, req: SizeRequest): SizeRequest {
-    if (rt.hintW <= 0 || performance.now() - rt.hintAt > HINT_TTL_MS) return req;
-    const s = Math.min(MAX_SIZE / req.w, MAX_SIZE / req.h, Math.max(rt.hintW / req.w, rt.hintH / req.h));
-    if (s <= 1.01) return req;
-    const e = rt.eff;
-    e.w = Math.min(MAX_SIZE, Math.round(req.w * s));
-    e.h = Math.min(MAX_SIZE, Math.round(req.h * s));
-    e.bw = bucket(e.w);
-    e.bh = bucket(e.h);
-    e.refW = req.refW;
-    e.refH = req.refH;
-    return e;
   }
 
   // Drawing
@@ -409,7 +435,7 @@ class WebGlRenderer implements Renderer {
       if (!l.visible || l.opacity <= 0) continue;
       const g = this.geometry(rt, w, h);
       if (!g.ok) continue;
-      rt.drawn = this.output(rt, g.req) !== null;
+      rt.drawn = this.output(rt) !== null;
     }
 
     // Pass 2: composite into the final target.
@@ -557,20 +583,7 @@ class WebGlRenderer implements Renderer {
       const rt = this.layers.get(layerId);
       let out: SourceOutput | null = null;
       if (rt) {
-        rt.hintW = w;
-        rt.hintH = h;
-        rt.hintAt = performance.now();
-        let req = rt.geom.req;
-        if (!rt.geom.sized) {
-          req = rt.geom.req;
-          req.w = clampSize(w);
-          req.h = clampSize(h);
-          req.bw = bucket(req.w);
-          req.bh = bucket(req.h);
-          req.refW = w;
-          req.refH = h;
-        }
-        out = this.output(rt, req);
+        out = this.output(rt);
         // Drawing back to the default framebuffer: restore it after any offscreen render.
         gl.bindFramebuffer(gl.FRAMEBUFFER, null);
         gl.viewport(0, 0, w, h);

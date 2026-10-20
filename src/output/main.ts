@@ -17,6 +17,7 @@ overlay.id = 'overlay';
 stage.appendChild(overlay);
 const octx = overlay.getContext('2d')!;
 
+(window as unknown as { __renderer: unknown }).__renderer = renderer;
 const channel = new BroadcastChannel(CHANNEL_NAME);
 const send = (m: OutputToEditor) => channel.postMessage(m);
 
@@ -54,6 +55,7 @@ function setProject(p: Project): void {
 channel.onmessage = (e: MessageEvent<EditorToOutput>) => {
   const m = e.data;
   if (m.type === 'project') setProject(m.project);
+  else if (m.type === 'clocks') renderer.syncClocks(m.layers, m.at);
   else if (m.type === 'identify') identifyUntil = performance.now() + 3000;
   else if (m.type === 'ping') sendStatus();
 };

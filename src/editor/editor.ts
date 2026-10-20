@@ -5,6 +5,7 @@ import { createRenderer } from '../render/renderer';
 import { assetStorage } from '../persist/db';
 import { startAutosave } from '../persist/autosave';
 import { OutputLink } from '../sync/outputLink';
+import { activeScene } from '../state/defaults';
 import type { Project } from '../state/types';
 import { Store } from '../state/store';
 import type { Ctx } from './ctx';
@@ -53,11 +54,30 @@ export function createEditor(root: HTMLElement, project: Project): Editor {
 
   // Keep the renderer, output window and panels in step with the project.
   let needsRefresh = true;
+  // The editor is the clock master: the output window follows the clocks sent from here.
+  let clocksDirty = true;
+  let clocksSig = '';
+  let clocksSentAt = -Infinity;
+  const ratesSig = (p: Project): string => {
+    let sig = `${p.playback.speed}|${p.playback.paused}`;
+    for (const l of activeScene(p).layers) {
+      if (l.kind !== 'content') continue;
+      const c = l.content;
+      sig += c.type === 'shader' ? `|${l.id}:${c.speed}:${c.paused}:${c.timeOffset}` : c.type === 'surface' && c.fill.type === 'video' ? `|${l.id}:${c.fill.playbackRate}:${c.fill.loop}` : '';
+    }
+    return sig;
+  };
   const onProject = () => {
     renderer.setProject(store.state);
     link.sendProject(store.state);
+    const sig = ratesSig(store.state);
+    if (sig !== clocksSig) {
+      clocksSig = sig;
+      clocksDirty = true;
+    }
     needsRefresh = true;
   };
+  link.onHello = () => { clocksDirty = true; };
   store.subscribe(onProject);
   ui.subscribe(() => { needsRefresh = true; });
   link.onStatus(() => {
@@ -90,6 +110,11 @@ export function createEditor(root: HTMLElement, project: Project): Editor {
       refresh();
     }
     renderer.tick(now);
+    if (clocksDirty || now - clocksSentAt >= 250) {
+      clocksDirty = false;
+      clocksSentAt = now;
+      link.sendClocks(renderer.getClocks());
+    }
     output.render(now);
     input.render();
     requestAnimationFrame(frame);
