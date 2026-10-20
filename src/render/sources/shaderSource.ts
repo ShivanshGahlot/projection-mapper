@@ -7,11 +7,13 @@ import { RenderTarget } from '../../gl/renderTarget';
 import { drawQuad } from '../../gl/quad';
 import type { Content, ShaderContent } from '../../state/types';
 import type { LayerClock, LayerStatus } from '../api';
+import { drawGrid } from '../grid';
 import {
   STATUS_LOADING,
   STATUS_OK,
   errorStatus,
   newOutput,
+  setFullOutput,
   type ContentSource,
   type FrameInfo,
   type SizeRequest,
@@ -37,6 +39,7 @@ export class ShaderSource implements ContentSource {
   private rate = 0;
   private ref: { t: number; at: number; r: number } | null = null;
   private frameIndex = 0;
+  private empty = false;
   private dirty = true;
   private rendered = false;
   private lastKey = '';
@@ -74,6 +77,9 @@ export class ShaderSource implements ContentSource {
     this.renderError = null;
     this.frameIndex = 0;
     this.rendered = false;
+    // No shader chosen yet: show the alignment grid until one is picked.
+    this.empty = source.trim() === '';
+    if (this.empty) return;
     try {
       this.program = new IsfProgram(this.gl, parseIsf(source));
     } catch (e) {
@@ -125,6 +131,15 @@ export class ShaderSource implements ContentSource {
   }
 
   render(size: SizeRequest): SourceOutput | null {
+    if (this.empty) {
+      const key = `grid/${size.bw}x${size.bh}`;
+      if (key !== this.lastKey) {
+        this.target.ensureSize(size.bw, size.bh);
+        drawGrid(this.gl, this.target);
+        this.lastKey = key;
+      }
+      return setFullOutput(this.out, this.target.texture, true);
+    }
     const program = this.program;
     if (!program || this.parseError || this.renderError) return null;
     try {
@@ -146,6 +161,7 @@ export class ShaderSource implements ContentSource {
       const tw = this.target.width;
       const th = this.target.height;
       const o = this.out;
+      o.premultiplied = false;
       o.scaleX = w / tw;
       o.scaleY = h / th;
       o.minX = 0.5 / tw;
@@ -167,6 +183,7 @@ export class ShaderSource implements ContentSource {
   }
 
   status(): LayerStatus {
+    if (this.empty) return STATUS_OK;
     if (this.parseError) return this.parseError;
     if (this.renderError) return this.renderError;
     if (!this.program) return STATUS_LOADING;

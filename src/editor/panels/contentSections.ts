@@ -198,16 +198,18 @@ export function buildShader(ctx: Ctx, b: Binder, id: string): { section: Section
 
   const groups = new Map<string, number>();
   for (const x of library.shaders) groups.set(x.category, 1);
+  const chosen = () => sh().source.trim() !== '';
   const options = [
+    ...(chosen() ? [] : [{ value: '__none', label: 'Choose a shader...' }]),
     ...library.shaders.map((x) => ({ value: x.id, label: x.name, group: x.category })),
-    ...(sh().builtinId === null ? [{ value: '__custom', label: `File: ${sh().fileName || 'custom'}` }] : []),
+    ...(sh().builtinId === null && chosen() ? [{ value: '__custom', label: `File: ${sh().fileName || 'custom'}` }] : []),
     { value: '__load', label: 'Load .fs file...' },
   ];
   const pick = selectRow({
     label: 'Shader',
     tip: 'The animated visual shown on this layer',
     options,
-    get: () => sh().builtinId ?? '__custom',
+    get: () => (chosen() ? (sh().builtinId ?? '__custom') : '__none'),
     set: (v) => {
       if (v === '__load') {
         void pickFile('.fs,.frag,.txt,text/plain').then(async (file) => {

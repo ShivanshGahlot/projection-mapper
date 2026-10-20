@@ -1,7 +1,6 @@
 // Project edits shared by the panels, canvas and keyboard: finding, adding,
 // duplicating, deleting and reordering layers and scenes.
 
-import { library } from '../library/index';
 import { activeScene, createContentLayer, createMaskLayer, createScene, defaultContent, newId, shaderContent } from '../state/defaults';
 import type { Store } from '../state/store';
 import type { ContentLayer, ContentType, Layer, Project, Scene, Vec2 } from '../state/types';
@@ -36,10 +35,9 @@ export function layerTypeKey(l: Layer): NewLayerType {
 }
 
 export function newContentFor(type: ContentType) {
-  if (type === 'shader') {
-    const s = library.defaultShader;
-    return shaderContent(s.source, s.fileName, s.id);
-  }
+  // A shader layer starts with no shader chosen: it shows the alignment grid
+  // until one is picked in Properties.
+  if (type === 'shader') return shaderContent('', '', null);
   return defaultContent(type);
 }
 
