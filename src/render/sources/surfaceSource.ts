@@ -53,6 +53,45 @@ void main() {
   o = vec4(c, 1.0);
 }`;
 
+// Alignment grid: square cells centred on the shape, bright outline, centre
+// cross and an inscribed circle. Line widths are in content pixels.
+const GRID_FS = `#version 300 es
+precision highp float;
+in vec2 v_uv;
+uniform vec2 u_size;
+out vec4 o;
+float line(float d, float w) {
+  return 1.0 - smoothstep(w * 0.5, w * 0.5 + 1.0, d);
+}
+void main() {
+  vec2 p = v_uv * u_size;
+  float px = max(1.0, min(u_size.x, u_size.y) / 360.0);
+  float cell = max(u_size.x, u_size.y) / 10.0;
+  vec2 c = p - u_size * 0.5;
+  vec2 g = abs(mod(c + cell * 0.5, cell) - cell * 0.5);
+  float grid = line(min(g.x, g.y), px);
+  vec2 e = min(p, u_size - p);
+  float border = line(min(e.x, e.y), px * 6.0);
+  float cross = max(line(abs(c.x), px * 2.0), line(abs(c.y), px * 2.0));
+  float circle = line(abs(length(c) - min(u_size.x, u_size.y) * 0.45), px * 2.0);
+  vec3 col = vec3(0.07, 0.07, 0.09);
+  col = mix(col, vec3(0.42, 0.42, 0.48), grid);
+  col = mix(col, vec3(0.23, 0.51, 0.96), max(cross, circle));
+  col = mix(col, vec3(1.0), border);
+  o = vec4(col, 1.0);
+}`;
+
+const gridPrograms = new WeakMap<WebGL2RenderingContext, { program: WebGLProgram; size: WebGLUniformLocation }>();
+function gridProgram(gl: WebGL2RenderingContext): { program: WebGLProgram; size: WebGLUniformLocation } {
+  let g = gridPrograms.get(gl);
+  if (!g) {
+    const program = createProgram(gl, FULLSCREEN_VS, GRID_FS);
+    g = { program, size: gl.getUniformLocation(program, 'u_size')! };
+    gridPrograms.set(gl, g);
+  }
+  return g;
+}
+
 interface GradientGl {
   program: WebGLProgram;
   radial: WebGLUniformLocation;
@@ -100,14 +139,25 @@ export class SurfaceSource implements ContentSource {
   }
 
   get generated(): boolean {
-    return this.fill.type === 'gradient';
+    return this.fill.type === 'gradient' || this.fill.type === 'grid';
   }
   readonly mirrorX = false;
 
   update(content: Content): boolean {
     if (content.type !== 'surface') return false;
-    const key = JSON.stringify(content.fill);
-    if (key !== this.key) this.setFill(content.fill);
+    const fill = content.fill;
+    const key = JSON.stringify(fill);
+    if (key === this.key) return true;
+    const cur = this.fill;
+    if (fill.type === 'video' && cur.type === 'video' && fill.assetId === cur.assetId) {
+      // Loop/speed changes apply to the playing video (in tick) instead of reloading it.
+      this.fill = fill;
+      this.key = key;
+      this.loop = fill.loop;
+      this.rate = fill.playbackRate;
+      return true;
+    }
+    this.setFill(fill);
     return true;
   }
 
@@ -146,6 +196,7 @@ export class SurfaceSource implements ContentSource {
         break;
       }
       case 'gradient':
+      case 'grid':
         this.target = new RenderTarget(gl);
         break;
       case 'image':
@@ -251,6 +302,20 @@ export class SurfaceSource implements ContentSource {
         if (!feed || !feed.update()) return null;
         if (this.st !== STATUS_OK) this.st = STATUS_OK;
         return setFullOutput(this.out, feed.texture, true);
+      }
+      case 'grid': {
+        const target = this.target!;
+        const key = `grid|${size.bw}x${size.bh}`;
+        if (key !== this.gradKey) {
+          const g = gridProgram(gl);
+          target.ensureSize(size.bw, size.bh);
+          target.bind();
+          gl.useProgram(g.program);
+          gl.uniform2f(g.size, target.width, target.height);
+          drawQuad(gl);
+          this.gradKey = key;
+        }
+        return setFullOutput(this.out, target.texture, true);
       }
       case 'gradient': {
         const target = this.target!;

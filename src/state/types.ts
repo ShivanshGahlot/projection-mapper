@@ -26,6 +26,8 @@ export interface GradientStop {
 
 export type Fill =
   | { type: 'none' }
+  /** Alignment grid: outline, square cells, centre cross. What new surfaces start with. */
+  | { type: 'grid' }
   | { type: 'color'; color: string }
   | { type: 'gradient'; kind: 'linear' | 'radial'; angle: number; stops: GradientStop[] }
   | { type: 'image'; assetId: string; fileName: string }

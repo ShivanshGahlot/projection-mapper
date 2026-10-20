@@ -48,6 +48,7 @@ export type Binder = ReturnType<typeof binder>;
 function fillLabel(f: Fill): string {
   switch (f.type) {
     case 'none': return 'None';
+    case 'grid': return 'Grid';
     case 'color': return f.color;
     case 'gradient': return f.kind === 'linear' ? 'Linear Gradient' : 'Radial Gradient';
     default: return f.fileName;
@@ -73,6 +74,7 @@ export function buildSurface(_ctx: Ctx, b: Binder): Section {
     const assetId = await assetStorage.put(file, file.name);
     setFill(kind === 'image' ? { type: 'image', assetId, fileName: file.name } : { type: 'video', assetId, fileName: file.name, loop: true, playbackRate: 1 });
   };
+  const gridBtn = mk('grid', 'Alignment grid (for lining the shape up with your object)', 'grid', () => setFill({ type: 'grid' }));
   const colorBtn = mk('droplet', 'Solid colour', 'color', () => {
     const f = surf().fill;
     if (f.type !== 'color') setFill({ type: 'color', color: '#ffffff' });
@@ -83,7 +85,7 @@ export function buildSurface(_ctx: Ctx, b: Binder): Section {
   const imgBtn = mk('image', 'Image from a file...', 'image', () => void pickMedia('image/*', 'image'));
   const vidBtn = mk('video', 'Video from a file...', 'video', () => void pickMedia('video/*', 'video'));
   const noneBtn = iconButton('x', 'No fill (transparent)', () => setFill({ type: 'none' }), 15, 'icon-btn fill-btn');
-  const buttons = [colorBtn, gradBtn, imgBtn, vidBtn];
+  const buttons = [gridBtn, colorBtn, gradBtn, imgBtn, vidBtn];
   const btnRow: Row = {
     el: h('div', 'fill-buttons', ...buttons.map((x) => x.btn), noneBtn),
     sync: () => {

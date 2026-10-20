@@ -41,7 +41,7 @@ export function shaderContent(source: string, fileName: string, builtinId: strin
 export function defaultContent(type: ContentType): Content {
   switch (type) {
     case 'surface':
-      return { type: 'surface', fill: { type: 'color', color: '#ffffff' } };
+      return { type: 'surface', fill: { type: 'grid' } };
     case 'shader':
       // The editor replaces this with the first built-in shader.
       return shaderContent('', '', null);
