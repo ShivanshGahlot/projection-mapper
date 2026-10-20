@@ -123,7 +123,7 @@ export function createProjectActions(base: Omit<Ctx, 'projects'>, getAutosave: (
             }
             if (!(await confirmDialog('Delete project', `Delete "${s.name}"? This cannot be undone.`, 'Delete', true))) return;
             await projectStorage.remove(s.id);
-            showProjects().catch(() => {});
+            await render();
           });
           del.classList.add('danger');
           return h('div', 'proj-row', h('div', 'proj-info', name, when), h('div', 'proj-actions', openBtn, rename, del));

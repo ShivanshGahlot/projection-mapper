@@ -68,11 +68,19 @@ export function createLayersPanel(ctx: Ctx) {
       row.addEventListener('contextmenu', (e) => {
         e.preventDefault();
         ctx.ui.select(l.id);
+        const all = activeScene(ctx.store.state).layers;
+        const order = all.findIndex((x) => x.id === l.id);
+        const count = all.length;
         openContextMenu(e.clientX, e.clientY, [
           { label: 'Rename', run: () => startRename(name, l.name, (v) => updateLayer(ctx, l.id, (x) => { x.name = v; })) },
           { label: 'Duplicate', shortcut: '⌘D', run: () => duplicateLayer(ctx, l.id) },
           { label: l.locked ? 'Unlock' : 'Lock', run: () => updateLayer(ctx, l.id, (x) => { x.locked = !x.locked; }) },
           { label: l.visible ? 'Hide' : 'Show', run: () => updateLayer(ctx, l.id, (x) => { x.visible = !x.visible; }) },
+          { separator: true },
+          { label: 'Bring to front', disabled: order === count - 1, run: () => moveLayer(ctx, l.id, count - 1) },
+          { label: 'Bring forward', disabled: order === count - 1, run: () => moveLayer(ctx, l.id, order + 1) },
+          { label: 'Send backward', disabled: order === 0, run: () => moveLayer(ctx, l.id, order - 1) },
+          { label: 'Send to back', disabled: order === 0, run: () => moveLayer(ctx, l.id, 0) },
           { separator: true },
           { label: 'Delete', shortcut: '⌫', danger: true, run: () => deleteLayer(ctx, l.id) },
         ]);

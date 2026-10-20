@@ -1,7 +1,7 @@
 // Top bar: File and Panels menus, output window status, project name and saved dot,
 // and undo/redo, pause, black-out and identify on the right.
 
-import { togglePause, toggleBlackout } from './commands';
+import { redo, toggleBlackout, togglePause, undo } from './commands';
 import type { Ctx } from './ctx';
 import { h } from './dom';
 import { icon, type IconName } from './icons';
@@ -56,8 +56,8 @@ export function createTopbar(ctx: Ctx) {
   nameEl.addEventListener('click', () => startRename(nameEl, store.state.name, (v) => projects.renameProject(v)));
   const centre = h('div', 'tb-centre', dot, nameEl);
 
-  const undoBtn = mkBtn('undo', 'Undo (⌘Z)', () => store.undo());
-  const redoBtn = mkBtn('redo', 'Redo (⇧⌘Z)', () => store.redo());
+  const undoBtn = mkBtn('undo', 'Undo (⌘Z)', () => undo(ctx));
+  const redoBtn = mkBtn('redo', 'Redo (⇧⌘Z)', () => redo(ctx));
   const pauseBtn = mkBtn('pause', 'Pause or play every shader and video (Space)', () => togglePause(ctx), 'Pause');
   const blackBtn = mkBtn('power', 'Black out: the projector shows pure black (B)', () => toggleBlackout(ctx), 'Black out');
   const identBtn = mkBtn('crosshair', 'Identify: flash each layer name on the projector so you can tell which shape is which', () => link.identify(), 'Identify');

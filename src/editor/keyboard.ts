@@ -1,6 +1,6 @@
 // Global keyboard shortcuts.
 
-import { toggleBlackout, togglePause } from './commands';
+import { redo, toggleBlackout, togglePause, undo } from './commands';
 import type { Ctx } from './ctx';
 import { isTyping } from './dom';
 import { layerPoints } from './geometryOps';
@@ -12,7 +12,7 @@ import { hooks } from './widgets/numberField';
 const PANEL_KEYS: Record<string, PanelId> = { s: 'scenes', l: 'layers', i: 'input', o: 'output', p: 'properties' };
 
 export function installKeyboard(ctx: Ctx, nudge: (dx: number, dy: number) => void): void {
-  const { store, ui, projects } = ctx;
+  const { ui, projects } = ctx;
   let spaceHeld = false;
 
   window.addEventListener('keydown', (e) => {
@@ -25,13 +25,13 @@ export function installKeyboard(ctx: Ctx, nudge: (dx: number, dy: number) => voi
         case 'z':
           if (typing) return;
           e.preventDefault();
-          if (e.shiftKey) store.redo();
-          else store.undo();
+          if (e.shiftKey) redo(ctx);
+          else undo(ctx);
           return;
         case 'y':
           if (typing) return;
           e.preventDefault();
-          store.redo();
+          redo(ctx);
           return;
         case 's':
           e.preventDefault();
