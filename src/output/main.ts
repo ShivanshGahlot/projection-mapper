@@ -18,8 +18,9 @@ stage.appendChild(overlay);
 const octx = overlay.getContext('2d')!;
 
 (window as unknown as { __renderer: unknown }).__renderer = renderer;
+const outputId = new URLSearchParams(location.search).get('outputId') || crypto.randomUUID();
 const channel = new BroadcastChannel(CHANNEL_NAME);
-const send = (m: OutputToEditor) => channel.postMessage(m);
+const send = (m: OutputToEditor) => channel.postMessage({ ...m, outputId });
 
 let project: Project | null = null;
 let identifyUntil = 0;
@@ -27,6 +28,15 @@ let hintUntil = performance.now() + 3000;
 let lastMove = performance.now();
 let W = 0;
 let H = 0;
+let cachedLayout: { fw: number; fh: number; dpr: number } | null = null;
+let layoutKey = '';
+let settleUntil = 0;
+let statusTimer = 0;
+function scheduleStatus(): void {
+  settleUntil = performance.now() + 350;
+  clearTimeout(statusTimer);
+  statusTimer = window.setTimeout(sendStatus, 370);
+}
 const errors: Record<string, string> = {};
 
 renderer.onStatusChange = (id, st) => {
@@ -61,6 +71,7 @@ channel.onmessage = (e: MessageEvent<EditorToOutput>) => {
 };
 
 function sendStatus(): void {
+  if (performance.now() < settleUntil) return;
   send({ type: 'status', width: W, height: H, fullscreen: !!document.fullscreenElement, fps: Math.round(renderer.stats.fps), errors: { ...errors } });
 }
 
@@ -71,6 +82,10 @@ function layout(): { fw: number; fh: number; dpr: number } {
   H = Math.max(1, Math.round(window.innerHeight * dpr));
   const pw = project?.canvas.width ?? W;
   const ph = project?.canvas.height ?? H;
+  const key = `${W}|${H}|${pw}|${ph}|${dpr}`;
+  if (key === layoutKey && cachedLayout) return cachedLayout;
+  layoutKey = key;
+  scheduleStatus();
   // Exact fill when sizes match; otherwise letterbox, preserving aspect.
   const scale = pw === W && ph === H ? 1 : Math.min(W / pw, H / ph);
   const fw = Math.max(1, Math.round(pw * scale));
@@ -93,7 +108,8 @@ function layout(): { fw: number; fh: number; dpr: number } {
     overlay.width = fw;
     overlay.height = fh;
   }
-  return { fw, fh, dpr };
+  cachedLayout = { fw, fh, dpr };
+  return cachedLayout;
 }
 
 function drawIdentify(fw: number, fh: number): void {
@@ -143,11 +159,11 @@ window.addEventListener('mousemove', () => {
 });
 window.addEventListener('resize', () => {
   layout();
-  sendStatus();
+  scheduleStatus();
 });
 document.addEventListener('fullscreenchange', () => {
   layout();
-  sendStatus();
+  scheduleStatus();
 });
 window.addEventListener('pagehide', () => send({ type: 'bye' }));
 setInterval(sendStatus, 1000);

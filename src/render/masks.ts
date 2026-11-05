@@ -11,6 +11,8 @@ interface Entry {
   builtSig: string;
   builtW: number;
   builtH: number;
+  projW: number;
+  projH: number;
   texture: WebGLTexture;
 }
 
@@ -29,7 +31,7 @@ export class MaskCache {
       const sig = `${mask.invert ? 1 : 0}|${mask.feather}|${mask.points.map((p) => `${p[0]},${p[1]}`).join(';')}`;
       let e = this.entries.get(mask.id);
       if (!e) {
-        e = { mask, sig, builtSig: '', builtW: 0, builtH: 0, texture: makeTexture(this.gl) };
+        e = { mask, sig, builtSig: '', builtW: 0, builtH: 0, projW: 0, projH: 0, texture: makeTexture(this.gl) };
         this.entries.set(mask.id, e);
       }
       e.mask = mask;
@@ -46,7 +48,7 @@ export class MaskCache {
   texture(id: string, w: number, h: number, projW: number, projH: number): WebGLTexture | null {
     const e = this.entries.get(id);
     if (!e) return null;
-    if (e.builtSig !== e.sig || e.builtW !== w || e.builtH !== h) this.build(e, w, h, projW, projH);
+    if (e.builtSig !== e.sig || e.builtW !== w || e.builtH !== h || e.projW !== projW || e.projH !== projH) this.build(e, w, h, projW, projH);
     return e.texture;
   }
 
@@ -80,6 +82,7 @@ export class MaskCache {
     e.builtSig = e.sig;
     e.builtW = w;
     e.builtH = h;
+    e.projW = projW; e.projH = projH;
   }
 
   dispose(): void {

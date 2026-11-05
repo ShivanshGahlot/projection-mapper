@@ -1,21 +1,22 @@
 // Properties panel: edits the selected layer. The panel is rebuilt only when the
 // selection or the layer's content type/shader changes; value edits just sync.
 
-import type { BlendMode, ContentLayer, ContentType } from '../../state/types';
+import type { BlendMode, ContentLayer } from '../../state/types';
 import type { Ctx } from '../ctx';
 import { h } from '../dom';
 import { alignLayer, resetShape, rotateLayer } from '../geometryOps';
-import { newContentFor, selectedLayer } from '../layerOps';
+import { setLayerType, selectedLayer, type NewLayerType } from '../layerOps';
 import { PANEL_LABELS } from '../uiState';
 import { panelShell } from '../widgets/panel';
 import { actionButtons, button, numberRow, pair, Section, segmented, selectRow, sliderRow, type Row } from '../widgets/rows';
 import { binder, buildMask, buildShader, buildSurface, buildText, buildWebcam } from './contentSections';
 
-const TYPES: { value: ContentType; label: string }[] = [
+const TYPES: { value: NewLayerType; label: string }[] = [
   { value: 'surface', label: 'Surface' },
   { value: 'shader', label: 'Shader' },
   { value: 'text', label: 'Text' },
   { value: 'webcam', label: 'Webcam' },
+  { value: 'mask', label: 'Mask' },
 ];
 
 const BLENDS: { value: BlendMode; label: string }[] = [
@@ -50,6 +51,13 @@ export function createPropertiesPanel(ctx: Ctx) {
       return;
     }
     const s = new Section('props');
+    s.add(selectRow({
+      label: 'Type',
+      tip: 'Map a surface with a grid, then choose Mask to cut out the same mapped shape. Switching content type replaces the content.',
+      options: TYPES,
+      get: () => { const layer = selectedLayer(ctx); return layer?.kind === 'mask' ? 'mask' : layer?.content.type ?? 'surface'; },
+      set: (v) => setLayerType(ctx, l.id, v as NewLayerType),
+    }));
     if (l.kind === 'mask') {
       s.addEl(h('div', 'prop-title', `Mask: ${l.name}`));
       s.add(buildMask(ctx, l.id));
@@ -59,15 +67,6 @@ export function createPropertiesPanel(ctx: Ctx) {
     const b = binder(ctx, l.id);
     const lay = () => b.layer();
 
-    s.add(
-      selectRow({
-        label: 'Type',
-        tip: 'What this layer shows. Switching type replaces its content but keeps its shape and position.',
-        options: TYPES,
-        get: () => lay().content.type,
-        set: (v) => b.edit((x) => { x.content = newContentFor(v as ContentType); }),
-      }),
-    );
     s.addEl(
       actionButtons([
         { icon: 'alignLeft', title: 'Align shape to the left edge of the canvas', run: () => b.edit((x) => alignLayer(x, ctx.store.state.canvas, 'left')) },

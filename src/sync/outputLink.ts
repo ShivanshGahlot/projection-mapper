@@ -13,7 +13,7 @@ export interface OutputLinkStatus {
   info: OutputStatus | null;
 }
 
-const STALE_MS = 3000;
+const STALE_MS = 15000;
 
 interface ScreenDetailed {
   isPrimary: boolean;
@@ -32,6 +32,8 @@ export class OutputLink {
   private win: Window | null = null;
   private current: OutputLinkStatus = { state: 'disconnected', info: null };
   private lastSeen = 0;
+  private activeOutputId: string | null = null;
+  private openedOutputId: string | null = null;
   /** Called when an output window says hello (so the editor can send clocks too). */
   onHello: (() => void) | null = null;
   private listeners = new Set<(s: OutputLinkStatus) => void>();
@@ -41,7 +43,8 @@ export class OutputLink {
   constructor() {
     this.channel.onmessage = (e: MessageEvent<OutputToEditor>) => this.onMessage(e.data);
     this.watchdog = window.setInterval(() => {
-      if (this.current.state === 'connected' && performance.now() - this.lastSeen > STALE_MS) this.setDisconnected();
+      if (this.win?.closed) { this.win = null; this.openedOutputId = null; this.setDisconnected(); }
+      else if (this.current.state === 'connected' && performance.now() - this.lastSeen > STALE_MS) this.setDisconnected();
     }, 500);
     this.post({ type: 'ping' });
   }
@@ -86,6 +89,8 @@ export class OutputLink {
 
   async openOutputWindow(): Promise<void> {
     if (this.win && !this.win.closed) {
+      this.activeOutputId = this.openedOutputId;
+      this.post({ type: 'ping' });
       this.win.focus();
       return;
     }
@@ -99,7 +104,11 @@ export class OutputLink {
         // permission denied: fall back to the default popup
       }
     }
-    this.win = window.open(this.outputUrl, 'output', features);
+    this.openedOutputId = crypto.randomUUID();
+    this.activeOutputId = this.openedOutputId;
+    const url = new URL(this.outputUrl); url.searchParams.set('outputId', this.openedOutputId);
+    this.win = window.open(url.href, 'output', features);
+    if (!this.win) { this.openedOutputId = null; this.activeOutputId = null; }
     this.win?.focus();
   }
 
@@ -116,6 +125,14 @@ export class OutputLink {
   }
 
   private onMessage(msg: OutputToEditor): void {
+    // Old/secondary output windows must not alternate our dimensions or disconnect
+    // the active projector. Prefer a fullscreen window when discovering one on reload.
+    if (this.activeOutputId && msg.outputId !== this.activeOutputId) {
+      if (!this.openedOutputId && msg.type === 'status' && msg.outputId && msg.fullscreen && !this.current.info?.fullscreen) {
+        this.activeOutputId = msg.outputId;
+      } else return;
+    }
+    if (!this.activeOutputId && msg.outputId) this.activeOutputId = msg.outputId;
     switch (msg.type) {
       case 'hello':
         if (this.lastProject) this.post({ type: 'project', project: this.lastProject });
@@ -133,6 +150,7 @@ export class OutputLink {
   }
 
   private setDisconnected(): void {
+    this.activeOutputId = null;
     this.set({ state: 'disconnected', info: null });
   }
 

@@ -15,7 +15,7 @@ const HANDLE_HIT = 9;
 const MIN_CROP = 0.02;
 const BLUE = '#3B82F6';
 
-type Drag = { kind: 'corner'; idx: number; orig: CropRect } | { kind: 'move'; orig: CropRect; start: Vec2 };
+type Drag = { kind: 'side'; idx: number; orig: CropRect } | { kind: 'corner'; idx: number; orig: CropRect } | { kind: 'move'; orig: CropRect; start: Vec2 };
 
 export function createInputPanel(ctx: Ctx) {
   const { store, ui, renderer } = ctx;
@@ -63,6 +63,11 @@ export function createInputPanel(ctx: Ctx) {
     const r = cropRectScreen(c);
     return [[r.x, r.y], [r.x + r.w, r.y], [r.x + r.w, r.y + r.h], [r.x, r.y + r.h]];
   };
+  const sideScreen = (crop: CropRect): Vec2[] => {
+    const pts = cornerScreen(crop);
+    return pts.map((a, i) => { const b = pts[(i + 1) % 4]; return [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2] as Vec2; });
+  };
+  const hitSide = (l: ContentLayer, p: Vec2): number => sideScreen(l.crop).findIndex((q) => Math.hypot(q[0] - p[0], q[1] - p[1]) <= HANDLE_HIT);
   const toNorm = (p: Vec2): Vec2 => {
     const c = vp.toContent(p);
     return [c[0] / vp.contentW, c[1] / vp.contentH];
@@ -110,6 +115,7 @@ export function createInputPanel(ctx: Ctx) {
     const p = vp.pointer(e);
     const idx = hitCorner(l, p);
     if (idx >= 0) drag = { kind: 'corner', idx, orig: { ...l.crop } };
+    else if (hitSide(l, p) >= 0) drag = { kind: 'side', idx: hitSide(l, p), orig: { ...l.crop } };
     else if (insideCrop(l, p)) drag = { kind: 'move', orig: { ...l.crop }, start: toNorm(p) };
     if (drag) vp.el.setPointerCapture(e.pointerId);
   });
@@ -119,7 +125,7 @@ export function createInputPanel(ctx: Ctx) {
     if (!l) return;
     const p = vp.pointer(e);
     if (!drag) {
-      vp.overlay.style.cursor = keys.space ? 'grab' : hitCorner(l, p) >= 0 ? 'crosshair' : insideCrop(l, p) ? 'move' : '';
+      vp.overlay.style.cursor = keys.space ? 'grab' : hitCorner(l, p) >= 0 || hitSide(l, p) >= 0 ? 'crosshair' : insideCrop(l, p) ? 'move' : '';
       return;
     }
     const n = toNorm(p);
@@ -130,6 +136,14 @@ export function createInputPanel(ctx: Ctx) {
       setCrop((c) => {
         c.x = clamp(d.orig.x + dx, 0, 1 - d.orig.w);
         c.y = clamp(d.orig.y + dy, 0, 1 - d.orig.h);
+      });
+    } else if (d.kind === 'side') {
+      const o = d.orig;
+      setCrop((c) => {
+        if (d.idx === 0) { c.y = clamp(n[1], 0, o.y + o.h - MIN_CROP); c.h = o.y + o.h - c.y; }
+        if (d.idx === 1) c.w = clamp(n[0] - o.x, MIN_CROP, 1 - o.x);
+        if (d.idx === 2) c.h = clamp(n[1] - o.y, MIN_CROP, 1 - o.y);
+        if (d.idx === 3) { c.x = clamp(n[0], 0, o.x + o.w - MIN_CROP); c.w = o.x + o.w - c.x; }
       });
     } else {
       // The corner opposite the dragged one stays put.
@@ -184,6 +198,10 @@ export function createInputPanel(ctx: Ctx) {
     c.strokeStyle = BLUE;
     c.lineWidth = 1.5;
     c.strokeRect(cr.x, cr.y, cr.w, cr.h);
+    for (const [x, y] of sideScreen(l.crop)) {
+      c.fillStyle = BLUE; c.strokeStyle = '#FFFFFF'; c.lineWidth = 1;
+      c.beginPath(); c.arc(x, y, 4, 0, Math.PI * 2); c.fill(); c.stroke();
+    }
     for (const [x, y] of cornerScreen(l.crop)) {
       c.fillStyle = BLUE;
       c.strokeStyle = '#FFFFFF';

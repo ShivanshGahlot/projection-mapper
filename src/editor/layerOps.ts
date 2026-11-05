@@ -2,6 +2,7 @@
 // duplicating, deleting and reordering layers and scenes.
 
 import { activeScene, createContentLayer, createMaskLayer, createScene, defaultContent, newId, shaderContent } from '../state/defaults';
+import { bounds } from '../geometry/homography';
 import type { Store } from '../state/store';
 import type { ContentLayer, ContentType, Layer, Project, Scene, Vec2 } from '../state/types';
 import type { UiStore } from './uiState';
@@ -39,6 +40,42 @@ export function newContentFor(type: ContentType) {
   // until one is picked in Properties.
   if (type === 'shader') return shaderContent('', '', null);
   return defaultContent(type);
+}
+
+/** Convert the selected mapped geometry without changing its id or stack position. */
+export function setLayerType(core: Core, id: string, type: NewLayerType): void {
+  const current = findLayer(core.store.state, id);
+  if (!current || layerTypeKey(current) === type) return;
+  core.store.update((p) => {
+    for (const scene of p.scenes) {
+      const index = scene.layers.findIndex((l) => l.id === id);
+      if (index < 0) continue;
+      const l = scene.layers[index];
+      if (l.kind === 'content' && type !== 'mask') {
+        l.content = newContentFor(type);
+      } else {
+        const common = { id: l.id, name: l.name, visible: l.visible, locked: l.locked, opacity: l.opacity };
+        if (l.kind === 'content') {
+          scene.layers[index] = {
+            ...createMaskLayer(l.name, p.canvas), ...common,
+            points: l.corners.map(([x, y]) => [x, y] as Vec2), feather: l.edgeFeather,
+          };
+        } else if (type !== 'mask') {
+          const replacement = createContentLayer(l.name, newContentFor(type), p.canvas);
+          const b = bounds(l.points);
+          replacement.corners = (l.points.length === 4
+            ? l.points.map(([x, y]) => [x, y] as Vec2)
+            : [[b.x, b.y], [b.x + b.w, b.y], [b.x + b.w, b.y + b.h], [b.x, b.y + b.h]]) as ContentLayer['corners'];
+          replacement.edgeFeather = l.feather;
+          // Return to a projected alignment grid when converting a mask to a surface.
+          if (replacement.content.type === 'surface') replacement.content.fill = { type: 'grid' };
+          scene.layers[index] = { ...replacement, ...common };
+        }
+      }
+      break;
+    }
+  });
+  core.ui.set({ selectedCorner: null });
 }
 
 /** Adds a layer on top of the stack of the active scene and selects it. */

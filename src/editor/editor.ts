@@ -84,7 +84,7 @@ export function createEditor(root: HTMLElement, project: Project): Editor {
     needsRefresh = true;
     props.syncErrors();
   });
-  renderer.onStatusChange = () => props.syncErrors();
+  renderer.onStatusChange = () => { needsRefresh = true; props.syncErrors(); };
   onProject();
 
   function refresh(): void {

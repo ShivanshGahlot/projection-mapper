@@ -149,7 +149,7 @@ export interface Project {
     testPattern: boolean;
   };
   /** Global playback for every shader/video clock. */
-  playback: { speed: number; paused: boolean };
+  playback: { speed: number; paused: boolean; videoSync?: { at: number; position: number } };
   scenes: Scene[];
   activeSceneId: string;
 }

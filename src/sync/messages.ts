@@ -22,9 +22,10 @@ export type EditorToOutput =
 
 export type OutputToEditor =
   /** Sent when the output window opens; the editor replies with 'project'. */
-  | { type: 'hello' }
+  | { type: 'hello'; outputId?: string }
   | {
       type: 'status';
+      outputId?: string;
       /** Drawable size of the output window in device pixels. */
       width: number;
       height: number;
@@ -33,4 +34,4 @@ export type OutputToEditor =
       /** layerId -> error message, for layers that fail in the output window. */
       errors: Record<string, string>;
     }
-  | { type: 'bye' };
+  | { type: 'bye'; outputId?: string };

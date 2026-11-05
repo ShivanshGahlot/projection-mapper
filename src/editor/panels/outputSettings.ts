@@ -1,5 +1,6 @@
 // The gear popover in the Output panel: canvas size, brightness, pause, test pattern...
 
+import { setPaused } from '../commands';
 import type { Ctx } from '../ctx';
 import { h } from '../dom';
 import { numberRow, pair, Section, selectRow, sliderRow, toggleRow, colorRow } from '../widgets/rows';
@@ -50,10 +51,10 @@ export function buildOutputSettings(ctx: Ctx): Section {
       set: (v, merge) => store.update((p) => { p.output.brightness = v / 100; }, merge ? { history: 'merge', key: 'brightness' } : {}),
     }),
     toggleRow({
-      label: 'Pause shaders',
+      label: 'Pause playback',
       tip: 'Freezes all animated shaders and videos (same as the Pause button on the top bar).',
       get: () => store.state.playback.paused,
-      set: (v) => store.update((p) => { p.playback.paused = v; }, { history: 'none' }),
+      set: (v) => setPaused(ctx, v),
     }),
     toggleRow({
       label: 'Test pattern',

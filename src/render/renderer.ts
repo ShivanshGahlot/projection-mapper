@@ -222,6 +222,7 @@ class WebGlRenderer implements Renderer {
       f.dt = Math.min(Math.max(real, 0), 0.1);
       f.globalSpeed = this.project?.playback.speed ?? 1;
       f.globalPaused = this.project?.playback.paused ?? false;
+      f.videoSync = this.project?.playback.videoSync;
       const d = new Date();
       f.date[0] = d.getFullYear();
       f.date[1] = d.getMonth() + 1;

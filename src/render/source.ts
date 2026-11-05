@@ -23,6 +23,7 @@ export interface FrameInfo {
   absMs: number;
   globalSpeed: number;
   globalPaused: boolean;
+  videoSync?: { at: number; position: number };
   /** year, month (1-12), day, seconds since midnight */
   date: readonly [number, number, number, number];
 }

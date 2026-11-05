@@ -89,6 +89,7 @@ export class SurfaceSource implements ContentSource {
   private paused = false;
   private ref: { v: number; at: number; r: number } | null = null;
   private nudged = false;
+  private syncEpoch: number | null = null;
   private st: LayerStatus = STATUS_OK;
   private token = 0;
   private gradKey = '';
@@ -131,6 +132,7 @@ export class SurfaceSource implements ContentSource {
     this.token++;
     this.nudged = false;
     this.ref = null;
+    this.syncEpoch = null;
     if (this.tex) gl.deleteTexture(this.tex);
     this.tex = null;
     this.feed?.video.pause();
@@ -217,7 +219,7 @@ export class SurfaceSource implements ContentSource {
     video.muted = true;
     video.loop = fill.loop;
     video.playsInline = true;
-    video.autoplay = true;
+    video.autoplay = false;
     video.playbackRate = fill.playbackRate;
     video.onerror = () => {
       if (token === this.token) this.st = { state: 'error', message: 'Video could not be loaded.' };
@@ -231,7 +233,7 @@ export class SurfaceSource implements ContentSource {
           return;
         }
         video.src = url;
-        if (this.wantPlaying) video.play().catch(() => {});
+        // tick starts playback after applying any shared video timeline.
       },
       (e) => {
         if (token === this.token) this.st = errorStatus(e);
@@ -242,14 +244,28 @@ export class SurfaceSource implements ContentSource {
   tick(frame: FrameInfo): void {
     const v = this.feed?.video;
     if (!v) return;
-    this.wantPlaying = !frame.globalPaused;
-    this.paused = frame.globalPaused;
+    const sync = frame.videoSync;
+    const waiting = !!sync && frame.absMs < sync.at;
+    this.wantPlaying = !frame.globalPaused && !waiting;
+    this.paused = !this.wantPlaying;
+    if (sync) {
+      const elapsed = frame.globalPaused ? 0 : Math.max(0, frame.absMs - sync.at) / 1000;
+      const target = (sync.position + elapsed) * this.rate;
+      this.ref = { v: target, at: frame.absMs, r: this.paused ? 0 : this.rate };
+      if (this.syncEpoch !== sync.at && v.readyState >= 1 && Number.isFinite(v.duration) && v.duration > 0) {
+        v.pause();
+        v.currentTime = this.loop ? target % v.duration : Math.min(target, v.duration);
+        v.playbackRate = this.rate;
+        this.nudged = false;
+        this.syncEpoch = sync.at;
+      }
+    } else this.syncEpoch = null;
     if (this.fill.type === 'video') {
       if (v.loop !== this.loop) v.loop = this.loop;
       if (!this.nudged && v.playbackRate !== this.rate) v.playbackRate = this.rate;
       this.follow(v, frame.absMs);
     }
-    if (frame.globalPaused) {
+    if (this.paused || (!!sync && v.readyState < 2)) {
       if (!v.paused) v.pause();
     } else if (v.paused && v.src) {
       v.play().catch(() => {});
@@ -286,8 +302,8 @@ export class SurfaceSource implements ContentSource {
       err = target - v.currentTime;
     }
     const abs = Math.abs(err);
-    if (abs > (this.paused ? 0.04 : 0.15)) {
-      v.currentTime = Math.min(Math.max(0, v.currentTime + err), dur);
+    if (abs > (this.paused ? 0.04 : this.syncEpoch !== null ? 0.08 : 0.15)) {
+      v.currentTime = Math.min(Math.max(0, target), dur);
       v.playbackRate = this.rate;
       this.nudged = false;
     } else if (!this.paused && abs > 0.03) {

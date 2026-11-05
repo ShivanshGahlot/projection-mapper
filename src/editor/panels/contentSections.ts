@@ -55,7 +55,7 @@ function fillLabel(f: Fill): string {
   }
 }
 
-export function buildSurface(_ctx: Ctx, b: Binder): Section {
+export function buildSurface(ctx: Ctx, b: Binder): Section {
   const s = new Section();
   const surf = () => b.content<SurfaceContent>();
   const setFill = (fill: Fill) => b.edit((l) => { (l.content as SurfaceContent).fill = fill; });
@@ -165,6 +165,11 @@ export function buildSurface(_ctx: Ctx, b: Binder): Section {
       } else if (f.type === 'video') {
         const v = () => surf().fill as Extract<Fill, { type: 'video' }>;
         const editV = (fn: (v: Extract<Fill, { type: 'video' }>) => void, key?: string) => b.edit((l) => fn((l.content as SurfaceContent).fill as Extract<Fill, { type: 'video' }>), key);
+        const resolution = h('span');
+        d.add({ el: labelled('Source resolution', resolution, 'Decoded video dimensions. The original video is uploaded at this resolution; the projector and mapped shape determine the detail visible on the wall.'), sync: () => {
+          const size = ctx.renderer.contentSize(b.layer().id);
+          resolution.textContent = size ? `${size.width} × ${size.height} px` : 'Loading…';
+        } });
         d.add(
           toggleRow({ label: 'Loop', tip: 'Start again when the video ends', get: () => v().loop, set: (x) => editV((o) => { o.loop = x; }) }),
           sliderRow({
@@ -416,12 +421,11 @@ export function buildMask(ctx: Ctx, id: string): Section {
       get: () => m().target,
       set: (v) => edit((x) => { x.target = v; }),
     }),
-    selectRow({
-      label: 'Mode',
-      tip: 'Hide inside cuts a hole. Show only inside hides everything outside the shape.',
-      options: [{ value: 'hide', label: 'Hide inside' }, { value: 'show', label: 'Show only inside' }],
-      get: () => (m().invert ? 'show' : 'hide'),
-      set: (v) => edit((x) => { x.invert = v === 'show'; }),
+    toggleRow({
+      label: 'Invert mask',
+      tip: 'Off: hide inside the shape. On: show only inside and hide everything outside.',
+      get: () => m().invert,
+      set: (v) => edit((x) => { x.invert = v; }),
     }),
     numberRow({
       rowLabel: 'Feather',

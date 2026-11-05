@@ -21,6 +21,7 @@ const HANDLE_HIT = 9;
 const BLUE = '#3B82F6';
 
 type Drag =
+  | { kind: 'edge'; id: string; idx: number; start: Vec2; orig: Vec2[] }
   | { kind: 'point'; id: string; idx: number; offset: Vec2; orig: Vec2 }
   | { kind: 'move'; id: string; start: Vec2; orig: Vec2[]; active: boolean; startScreen: Vec2 };
 
@@ -77,7 +78,7 @@ export function createOutputPanel(ctx: Ctx) {
 
   function outputSize(): { width: number; height: number } | null {
     const st = link.status;
-    return st.state === 'connected' && st.info ? { width: st.info.width, height: st.info.height } : null;
+    return st.state === 'connected' && st.info?.fullscreen ? { width: st.info.width, height: st.info.height } : null;
   }
 
   cropBtn.addEventListener('click', () => {
@@ -99,6 +100,16 @@ export function createOutputPanel(ctx: Ctx) {
       }
     });
     return best;
+  }
+
+  function sideAt(layer: Layer, p: Vec2): number {
+    if (layer.kind !== 'content') return -1;
+    for (let i = 0; i < 4; i++) {
+      const a = layer.corners[i], b = layer.corners[(i + 1) % 4];
+      const q = vp.toScreen([(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]);
+      if (Math.hypot(q[0] - p[0], q[1] - p[1]) <= HANDLE_HIT) return i;
+    }
+    return -1;
   }
 
   function layerAt(c: Vec2): Layer | null {
@@ -158,6 +169,15 @@ export function createOutputPanel(ctx: Ctx) {
         return;
       }
     }
+    if (sel && !sel.locked) {
+      const idx = sideAt(sel, p);
+      if (idx >= 0) {
+        ui.set({ selectedCorner: null });
+        drag = { kind: 'edge', id: sel.id, idx, start: c, orig: layerPoints(sel).map((q) => [...q] as Vec2) };
+        vp.el.setPointerCapture(e.pointerId);
+        return;
+      }
+    }
     const hit = layerAt(c);
     if (!hit) {
       ui.select(null);
@@ -176,7 +196,17 @@ export function createOutputPanel(ctx: Ctx) {
       return;
     }
     const d = drag;
-    if (d.kind === 'point') {
+    if (d.kind === 'edge') {
+      let dx = c[0] - d.start[0], dy = c[1] - d.start[1];
+      if (e.shiftKey) { if (Math.abs(dx) >= Math.abs(dy)) dy = 0; else dx = 0; }
+      store.update((pr) => {
+        const l = findLayer(pr, d.id);
+        if (!l || l.locked) return;
+        for (const i of [d.idx, (d.idx + 1) % 4]) {
+          layerPoints(l)[i] = [Math.round((d.orig[i][0] + dx) * 10) / 10, Math.round((d.orig[i][1] + dy) * 10) / 10];
+        }
+      }, { history: 'merge', key: `edge:${d.id}:${d.idx}` });
+    } else if (d.kind === 'point') {
       let x = c[0] + d.offset[0];
       let y = c[1] + d.offset[1];
       if (e.shiftKey) {
@@ -250,6 +280,7 @@ export function createOutputPanel(ctx: Ctx) {
     let cursor = '';
     let hover: string | null = null;
     if (keys.space) cursor = 'grab';
+    else if (sel && !sel.locked && sideAt(sel, p) >= 0) cursor = 'move';
     else if (sel && handleAt(sel, p) >= 0) cursor = sel.kind === 'mask' ? 'pointer' : 'crosshair';
     else {
       const hit = layerAt(c);
@@ -340,6 +371,14 @@ export function createOutputPanel(ctx: Ctx) {
     const sel = selectedLayer(ctx);
     if (sel) {
       const pts = layerPoints(sel);
+      if (sel.kind === 'content') {
+        for (let i = 0; i < 4; i++) {
+          const a = pts[i], b = pts[(i + 1) % 4];
+          const [x, y] = vp.toScreen([(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]);
+          c.fillStyle = sel.locked ? '#777777' : BLUE; c.strokeStyle = '#FFFFFF'; c.lineWidth = 1;
+          c.beginPath(); c.arc(x, y, 4, 0, Math.PI * 2); c.fill(); c.stroke();
+        }
+      }
       pts.forEach((q, i) => {
         const [x, y] = vp.toScreen(q);
         const active = ui.state.selectedCorner === i;
